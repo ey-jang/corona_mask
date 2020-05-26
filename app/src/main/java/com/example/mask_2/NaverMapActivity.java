@@ -11,6 +11,10 @@ import retrofit2.Response;
 import retrofit2.Retrofit;
 import retrofit2.converter.gson.GsonConverterFactory;
 
+import android.app.AlarmManager;
+import android.app.Notification;
+import android.app.NotificationManager;
+import android.app.PendingIntent;
 import android.content.Context;
 import android.content.DialogInterface;
 import android.content.Intent;
@@ -19,6 +23,7 @@ import android.graphics.PointF;
 import android.location.LocationManager;
 import android.net.Uri;
 import android.os.Bundle;
+import android.util.Log;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
@@ -28,7 +33,11 @@ import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import com.google.android.gms.tasks.OnCompleteListener;
+import com.google.android.gms.tasks.Task;
 import com.google.android.material.snackbar.Snackbar;
+import com.google.firebase.iid.FirebaseInstanceId;
+import com.google.firebase.iid.InstanceIdResult;
 import com.naver.maps.geometry.LatLng;
 import com.naver.maps.map.CameraPosition;
 import com.naver.maps.map.MapFragment;
@@ -47,12 +56,14 @@ import com.naver.maps.map.util.MarkerIcons;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Calendar;
 import java.util.List;
 import java.util.zip.Inflater;
 
 
 public class NaverMapActivity extends AppCompatActivity implements NaverMap.OnMapClickListener, Overlay.OnClickListener, OnMapReadyCallback, NaverMap.OnCameraChangeListener, NaverMap.OnCameraIdleListener {
 
+    private static int ONE_MINUTE=5626;
     private static final int ACCESS_LOCATION_PERMISSION_REQUEST_CODE = 100;
     private FusedLocationSource locationSource;
     private NaverMap naverMap;
@@ -61,7 +72,9 @@ public class NaverMapActivity extends AppCompatActivity implements NaverMap.OnMa
     TextView stock;
     TextView time;
 
+
     Button root;
+    Button btnSetting;
     FrameLayout frame;
     View view;
 
@@ -85,21 +98,73 @@ public class NaverMapActivity extends AppCompatActivity implements NaverMap.OnMa
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_naver_map);
 
+        new AlarmHATT(getApplicationContext()).Alarm();
+
         mainLayout = findViewById(R.id.main_layout);
         MapFragment mapFragment = (MapFragment) getSupportFragmentManager().findFragmentById(R.id.map);
 
         mapFragment.getMapAsync(this); //비동기적으로 지도 데이터를 불러오기
 
         frame = (FrameLayout)findViewById(R.id.frame);
+        Button btnSetting = (Button)findViewById(R.id.btnSetting);
 
         //xml 파일 객체화 준비
         LayoutInflater in = (LayoutInflater)getSystemService(LAYOUT_INFLATER_SERVICE);
         view = in.inflate(R.layout.view_go, null);
 
+        btnSetting.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                Intent intent = new Intent(getApplicationContext(), SettingActivity.class);
+                startActivity(intent);
+            }
+        });
+
+        FirebaseInstanceId.getInstance().getInstanceId()
+                .addOnCompleteListener(new OnCompleteListener<InstanceIdResult>() {
+                    @Override
+                    public void onComplete(@NonNull Task<InstanceIdResult> task) {
+                        if(!task.isSuccessful()){
+                            Log.w("FCM Log", "getInstanceId failed", task.getException());
+                            return;
+                        }
+                        String token = task.getResult().getToken();
+                        Log.d("FCM Log", "FCM 토큰 :  "+token);
+                        Toast.makeText(NaverMapActivity.this, token, Toast.LENGTH_SHORT).show();
+                    }
+                });
 
 
+    }   //onCreate
+
+
+
+
+    public class AlarmHATT {
+        private Context context;
+
+        public AlarmHATT(Context context) {
+            this.context = context;
+        }
+
+        public void Alarm() {
+            AlarmManager am = (AlarmManager) getSystemService(Context.ALARM_SERVICE);
+            Intent intent = new Intent(NaverMapActivity.this, BroadcastD.class);
+
+            PendingIntent sender = PendingIntent.getBroadcast(NaverMapActivity.this, 0, intent, 0);
+
+            Calendar calendar = Calendar.getInstance();
+            //알람시간 calendar에 set해주기
+
+            calendar.set(calendar.get(Calendar.YEAR), calendar.get(Calendar.MONTH), calendar.get(Calendar.DATE), 13, 23, 0);
+
+
+            //알람 예약
+            am.set(AlarmManager.RTC_WAKEUP, calendar.getTimeInMillis(), sender);
+        }
 
     }
+
 
 
 
@@ -241,7 +306,7 @@ public class NaverMapActivity extends AppCompatActivity implements NaverMap.OnMa
     @Override
     public boolean onClick(@NonNull Overlay overlay) { //부모클래스로부터 상속받았다(overlay)
         if(overlay instanceof Marker){
-            Marker marker = (Marker) overlay;
+            final Marker marker = (Marker) overlay;
             final Store store = (Store) marker.getTag(); //필요한 store 정보 가져오기
             LatLng mapCenter = naverMap.getCameraPosition().target; //중심점에 대한 위치
             PathOverlay path = new PathOverlay();
@@ -277,7 +342,28 @@ public class NaverMapActivity extends AppCompatActivity implements NaverMap.OnMa
 
             if(marker.getInfoWindow() != null){
                 infoWindow.close(); //인포윈도우가 표시되었을 때 클릭시 없애기
+                new AlertDialog.Builder(NaverMapActivity.this)
+                        .setMessage("즐겨찾기로 등록하시겠습니까?")
+                        .setPositiveButton("확인", new DialogInterface.OnClickListener() {
+                            @Override
+                            public void onClick(DialogInterface dialog, int which) {
+                                Toast.makeText(getApplicationContext(), "등록되었습니다.", Toast.LENGTH_LONG).show();
+                                Intent resultIntent = new Intent(getApplicationContext(), SettingActivity.class);
+                                resultIntent.putExtra("drug", ((Store) marker.getTag()).name);
 
+                                startActivityForResult(resultIntent, 1000);
+
+                              //  finish();
+
+                            }
+                        })
+                        .setNegativeButton("취소", new DialogInterface.OnClickListener() {
+                            @Override
+                            public void onClick(DialogInterface dialog, int which) {
+
+                            }
+                        })
+                        .show();
 
             } else{
                 infoWindow.open(marker); // 마커위에 인포윈도우 표시시
